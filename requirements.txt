@@ -9,7 +9,7 @@ sentence-transformers==2.7.0
 faiss-cpu==1.8.0
 
 # LLM
-groq==0.9.0
+groq==1.4.0
 
 # API
 fastapi==0.111.0

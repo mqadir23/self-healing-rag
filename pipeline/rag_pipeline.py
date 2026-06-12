@@ -61,9 +61,9 @@ class SelfHealingRAGPipeline:
 
         print("[Pipeline] Self-Healing RAG Pipeline successfully initialized.")
 
-    def ingest_directory(self, data_dir: str = "data", chunk_size: int = 512, chunk_overlap: int = 100) -> int:
+    async def ingest_directory(self, data_dir: str = "data", chunk_size: int = 512, chunk_overlap: int = 100) -> int:
         """
-        Run the complete ingestion flow for a directory:
+        Run the complete ingestion flow for a directory asynchronously:
         Load -> Chunk -> Embed -> Index in FAISS.
 
         Args:
@@ -75,7 +75,7 @@ class SelfHealingRAGPipeline:
             Number of chunks indexed.
         """
         print(f"[Pipeline] Starting ingestion from directory: {data_dir}...")
-        self.vector_store.reset()
+        await self.vector_store.reset()
 
         # 1. Load documents
         documents = load_documents(data_dir)
@@ -91,16 +91,16 @@ class SelfHealingRAGPipeline:
 
         # 3. Generate embeddings
         texts = [chunk.content for chunk in chunks]
-        embeddings = self.embedder.embed_texts(texts)
+        embeddings = await self.embedder.embed_texts(texts)
 
         # 4. Add to Vector Store
-        self.vector_store.add(embeddings, chunks)
+        await self.vector_store.add(embeddings, chunks)
         print(f"[Pipeline] Ingestion complete. Indexed {len(chunks)} chunks.")
         return len(chunks)
 
-    def query(self, user_query: str) -> dict:
+    async def query(self, user_query: str) -> dict:
         """
-        Execute a query against the self-healing RAG pipeline.
+        Execute a query against the self-healing RAG pipeline asynchronously.
 
         Loops through Retrieval -> Generation -> Evaluation -> Healing
         until the answer passes evaluation or max_retries is reached.
@@ -129,10 +129,10 @@ class SelfHealingRAGPipeline:
             print(f"[Pipeline] Retrieval Query: '{current_query}' | K: {current_k}")
 
             # 1. Embed current query
-            query_vector = self.embedder.embed_query(current_query)
+            query_vector = await self.embedder.embed_query(current_query)
 
             # 2. Retrieve top-K chunks from FAISS
-            search_results = self.vector_store.search(query_vector, top_k=current_k)
+            search_results = await self.vector_store.search(query_vector, top_k=current_k)
             print(f"[Pipeline] Retrieved {len(search_results)} chunk(s).")
 
             # 3. Generate answer
@@ -146,7 +146,7 @@ class SelfHealingRAGPipeline:
                 gen_mod.SYSTEM_PROMPT = f"{old_prompt}\n\nCRITICAL DIRECTIVE:\n{stricter_directive}"
 
             try:
-                gen_res = self.generator.generate(user_query, search_results)
+                gen_res = await self.generator.generate(user_query, search_results)
                 generated_answer = gen_res["answer"]
                 context_used = gen_res["context_used"]
             finally:
@@ -155,7 +155,7 @@ class SelfHealingRAGPipeline:
                     gen_mod.SYSTEM_PROMPT = old_prompt
 
             # 4. Evaluate generated answer
-            eval_res = self.evaluator.evaluate(user_query, search_results, context_used, generated_answer)
+            eval_res = await self.evaluator.evaluate(user_query, search_results, context_used, generated_answer)
 
             # Record this attempt in trace history
             trace_item = {
@@ -193,7 +193,7 @@ class SelfHealingRAGPipeline:
                 break
 
             print(f"[Pipeline] FAIL: Evaluation failed. Triggering healer...")
-            healing_plan = self.healer.heal(
+            healing_plan = await self.healer.heal(
                 original_query=user_query,
                 last_answer=generated_answer,
                 eval_result=eval_res,

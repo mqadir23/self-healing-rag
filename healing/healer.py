@@ -9,7 +9,7 @@ Analyzes evaluation failures and generates targeted repair strategies:
 """
 
 import os
-from groq import Groq
+from groq import AsyncGroq
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,12 +50,12 @@ class QueryHealer:
         if not api_key:
             raise ValueError("GROQ_API_KEY not found in environment variables.")
 
-        self.client = Groq(api_key=api_key)
+        self.client = AsyncGroq(api_key=api_key)
         self.model = model
         print(f"[Healer] Initialized — model={model}")
 
-    def _reformulate_query(self, query: str, failure_mode: str, reasoning: str, last_answer: str) -> str:
-        """Call Groq to rewrite the query."""
+    async def _reformulate_query(self, query: str, failure_mode: str, reasoning: str, last_answer: str) -> str:
+        """Call Groq to rewrite the query asynchronously."""
         prompt = REFORMULATION_PROMPT.format(
             query=query,
             failure_mode=failure_mode,
@@ -63,7 +63,7 @@ class QueryHealer:
             answer=last_answer
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "user", "content": prompt}
@@ -77,11 +77,11 @@ class QueryHealer:
         new_query = new_query.strip('"').strip("'")
         return new_query
 
-    def _generate_strict_directive(self, reasoning: str) -> str:
-        """Generate a custom strict directive for hallucination avoidance."""
+    async def _generate_strict_directive(self, reasoning: str) -> str:
+        """Generate a custom strict directive for hallucination avoidance asynchronously."""
         prompt = STRICT_Grounding_PROMPT.format(reasoning=reasoning)
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "user", "content": prompt}
@@ -92,9 +92,9 @@ class QueryHealer:
 
         return response.choices[0].message.content.strip()
 
-    def heal(self, original_query: str, last_answer: str, eval_result: dict, current_k: int) -> dict:
+    async def heal(self, original_query: str, last_answer: str, eval_result: dict, current_k: int) -> dict:
         """
-        Produce a healing plan based on the evaluation result.
+        Produce a healing plan based on the evaluation result asynchronously.
 
         Args:
             original_query: The original question asked by the user.
@@ -128,7 +128,7 @@ class QueryHealer:
         # AND as requested by the user, we also do query reformulation for hallucinations.
         if failure_mode in ["bad_retrieval", "insufficient_context", "incomplete", "off_topic", "hallucination"]:
             try:
-                healed_query = self._reformulate_query(original_query, failure_mode, reasoning, last_answer)
+                healed_query = await self._reformulate_query(original_query, failure_mode, reasoning, last_answer)
                 print(f"[Healer] Reformulated query: '{original_query}' -> '{healed_query}'")
             except Exception as e:
                 print(f"[Healer] Error reformulating query: {e}. Falling back to original query.")
@@ -136,7 +136,7 @@ class QueryHealer:
         # 3. Add custom grounding directives for hallucinations
         if failure_mode == "hallucination":
             try:
-                stricter_directive = self._generate_strict_directive(reasoning)
+                stricter_directive = await self._generate_strict_directive(reasoning)
                 print(f"[Healer] Generated anti-hallucination directive: {stricter_directive}")
             except Exception as e:
                 print(f"[Healer] Error generating directive: {e}. Using standard grounding warning.")

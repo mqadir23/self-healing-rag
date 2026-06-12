@@ -9,7 +9,7 @@ context relevance, completeness) to determine pass/fail status and diagnose fail
 import os
 import json
 import re
-from groq import Groq
+from groq import AsyncGroq
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,7 +68,7 @@ class AnswerEvaluator:
         if not api_key:
             raise ValueError("GROQ_API_KEY not found in environment variables.")
 
-        self.client = Groq(api_key=api_key)
+        self.client = AsyncGroq(api_key=api_key)
         self.model = model
         self.min_pass_score = min_pass_score
         self.min_retrieval_similarity = min_retrieval_similarity
@@ -137,15 +137,15 @@ class AnswerEvaluator:
         )
         return round(overall, 3)
 
-    def _query_llm_judge(self, query: str, context_str: str, answer: str) -> dict:
-        """Call Groq to run the LLM-as-a-judge evaluation."""
+    async def _query_llm_judge(self, query: str, context_str: str, answer: str) -> dict:
+        """Call Groq to run the LLM-as-a-judge evaluation asynchronously."""
         formatted_prompt = EVAL_PROMPT.format(
             query=query,
             context=context_str,
             answer=answer
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "user", "content": formatted_prompt}
@@ -173,9 +173,9 @@ class AnswerEvaluator:
                 "reasoning": f"Failed to parse LLM Judge response: {e}"
             }
 
-    def evaluate(self, query: str, search_results: list[dict], formatted_context: str, answer: str) -> dict:
+    async def evaluate(self, query: str, search_results: list[dict], formatted_context: str, answer: str) -> dict:
         """
-        Orchestrate the hybrid evaluation flow.
+        Orchestrate the hybrid evaluation flow asynchronously.
 
         Args:
             query: The user query.
@@ -229,7 +229,7 @@ class AnswerEvaluator:
 
         # Otherwise, run LLM-as-a-judge for semantic evaluation
         print("[Evaluator] Running LLM-as-a-judge semantic evaluation...")
-        judge_res = self._query_llm_judge(query, formatted_context, answer)
+        judge_res = await self._query_llm_judge(query, formatted_context, answer)
         
         # Ensure overall score is re-calculated correctly according to weights
         metrics = {

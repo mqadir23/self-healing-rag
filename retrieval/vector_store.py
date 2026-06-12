@@ -5,6 +5,7 @@ Uses IndexHNSWFlat for fast, near-exact approximate nearest neighbor search.
 Stores chunk metadata alongside embeddings for retrieval traceability.
 """
 
+import asyncio
 import faiss
 import numpy as np
 
@@ -56,9 +57,9 @@ class VectorStore:
         print(f"[VectorStore] Initialized HNSW index — dim={dimension}, M={M}, "
               f"efConstruction={ef_construction}, efSearch={ef_search}")
 
-    def add(self, embeddings: np.ndarray, chunks: list) -> None:
+    async def add(self, embeddings: np.ndarray, chunks: list) -> None:
         """
-        Add embeddings and their corresponding chunks to the store.
+        Add embeddings and their corresponding chunks to the store asynchronously.
 
         Args:
             embeddings: NumPy array of shape (n, dimension).
@@ -69,13 +70,13 @@ class VectorStore:
                 f"Mismatch: {len(embeddings)} embeddings vs {len(chunks)} chunks"
             )
 
-        self.index.add(embeddings)
+        await asyncio.to_thread(self.index.add, embeddings)
         self.chunks.extend(chunks)
         print(f"[VectorStore] Added {len(chunks)} vectors — total: {self.index.ntotal}")
 
-    def search(self, query_embedding: np.ndarray, top_k: int = None) -> list[dict]:
+    async def search(self, query_embedding: np.ndarray, top_k: int = None) -> list[dict]:
         """
-        Search for the most similar chunks to a query embedding.
+        Search for the most similar chunks to a query embedding asynchronously.
 
         Args:
             query_embedding: NumPy array of shape (1, dimension).
@@ -96,7 +97,7 @@ class VectorStore:
         # Clamp k to the number of stored vectors
         k = min(k, self.index.ntotal)
 
-        distances, indices = self.index.search(query_embedding, k)
+        distances, indices = await asyncio.to_thread(self.index.search, query_embedding, k)
 
         results = []
         for rank, (idx, score) in enumerate(zip(indices[0], distances[0]), start=1):
@@ -112,8 +113,8 @@ class VectorStore:
 
         return results
 
-    def reset(self) -> None:
-        """Clear the index and all stored chunks."""
-        self.index.reset()
+    async def reset(self) -> None:
+        """Clear the index and all stored chunks asynchronously."""
+        await asyncio.to_thread(self.index.reset)
         self.chunks.clear()
         print("[VectorStore] Index reset.")

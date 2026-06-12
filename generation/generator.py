@@ -6,7 +6,7 @@ that enforces context-only answering with citations.
 """
 
 import os
-from groq import Groq
+from groq import AsyncGroq
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -48,7 +48,7 @@ class Generator:
         if not api_key:
             raise ValueError("GROQ_API_KEY not found in environment variables.")
 
-        self.client = Groq(api_key=api_key)
+        self.client = AsyncGroq(api_key=api_key)
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -88,9 +88,9 @@ class Generator:
 
         return formatted
 
-    def generate(self, query: str, search_results: list[dict]) -> dict:
+    async def generate(self, query: str, search_results: list[dict]) -> dict:
         """
-        Generate an answer for the given query using retrieved context.
+        Generate an answer for the given query using retrieved context asynchronously.
 
         Args:
             query: The user's question.
@@ -110,7 +110,7 @@ class Generator:
             f"Answer based strictly on the context above:"
         )
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},

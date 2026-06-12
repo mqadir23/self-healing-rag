@@ -93,7 +93,7 @@ async def reset_index():
     if pipeline is None:
         raise HTTPException(status_code=503, detail="Pipeline is initializing.")
 
-    pipeline.vector_store.reset()
+    await pipeline.vector_store.reset()
     return {"message": "FAISS index and metadata store successfully cleared."}
 
 
@@ -124,7 +124,7 @@ async def ingest_documents(
 
     # 2. Run ingestion pipeline
     try:
-        num_chunks = pipeline.ingest_directory(DATA_DIR)
+        num_chunks = await pipeline.ingest_directory(DATA_DIR)
         return {
             "message": "Ingestion completed successfully.",
             "total_chunks_indexed": num_chunks,
@@ -150,7 +150,7 @@ async def query_pipeline(request: QueryRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     try:
-        result = pipeline.query(request.query)
+        result = await pipeline.query(request.query)
         return result
     except Exception as e:
         print(f"[API] Query error: {e}")
