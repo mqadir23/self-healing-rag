@@ -99,7 +99,7 @@ async def reset_index():
 
 @app.post("/ingest", tags=["Ingestion"])
 async def ingest_documents(
-    files: list[UploadFile] = File(None, description="Optional files to upload and ingest. If omitted, scans data/ folder.")
+    files: list[UploadFile | str] | None = File(None, description="Optional files to upload and ingest. If omitted, scans data/ folder.")
 ):
     """
     Ingest documents into the RAG vector store.
@@ -111,8 +111,17 @@ async def ingest_documents(
         raise HTTPException(status_code=503, detail="Pipeline is initializing.")
 
     # 1. Save uploaded files to data/ if present
+    valid_files = []
     if files:
-        for file in files:
+        for f in files:
+            if isinstance(f, str):
+                continue
+            if getattr(f, "filename", "") == "":
+                continue
+            valid_files.append(f)
+
+    if valid_files:
+        for file in valid_files:
             file_path = os.path.join(DATA_DIR, file.filename)
             try:
                 with open(file_path, "wb") as buffer:
