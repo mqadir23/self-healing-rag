@@ -82,7 +82,7 @@ class AnswerEvaluator:
 
     def __init__(
         self,
-        model: str = "llama3-70b-8192",
+        model: str = "llama-3.3-70b-versatile",
         min_pass_score: float = 0.75,
         min_retrieval_similarity: float = 0.60,
     ):

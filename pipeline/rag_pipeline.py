@@ -34,7 +34,7 @@ class SelfHealingRAGPipeline:
     def __init__(
         self,
         model_name: str = "all-mpnet-base-v2",
-        llm_model: str = "llama3-70b-8192",
+        llm_model: str = "llama-3.3-70b-versatile",
         default_k: int = 5,
         max_retries: int = 3,
         min_pass_score: float = 0.75,

@@ -23,7 +23,7 @@ graph TD
 ### Components:
 1. **Ingestion (`ingestion/loader.py`, `ingestion/chunker.py`)**: Supports PDF (PyMuPDF), DOCX, TXT, and Markdown files. Uses structure-aware section splitting and falls back to recursive character chunking (512-character chunks, 100-character overlap). Extracts rich metadata (filename, page, type, timestamp).
 2. **Retrieval (`retrieval/embedder.py`, `retrieval/vector_store.py`)**: Uses the `all-mpnet-base-v2` SentenceTransformer to generate dense vectors. Performs fast, near-exact search using a local FAISS `IndexHNSWFlat` index.
-3. **Generation (`generation/generator.py`)**: Calls Groq's `llama3-70b-8192` model at `temp=0.3`. Incorporates strict system guidelines and a structured context presentation containing source metadata and relevance scores.
+3. **Generation (`generation/generator.py`)**: Calls Groq's `llama-3.3-70b-versatile` model at `temp=0.3`. Incorporates strict system guidelines and a structured context presentation containing source metadata and relevance scores.
 4. **Evaluation (`evaluation/evaluator.py`)**: 
    - **Heuristics**: Fast-fails on low FAISS similarity scores, answer length anomalies, or refusal statements (e.g., "I don't have enough information").
    - **LLM-as-a-Judge**: Evaluates four dimensions: *Context Relevance*, *Faithfulness* (hallucination check), *Answer Relevance*, and *Answer Completeness*.
