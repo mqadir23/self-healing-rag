@@ -9,11 +9,23 @@ Analyzes evaluation failures and generates targeted repair strategies:
 """
 
 import os
+import logging
+import groq as groq_module
 from groq import AsyncGroq
 from dotenv import load_dotenv
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+# Groq transient errors safe to retry
+_GROQ_RETRYABLE = (
+    groq_module.RateLimitError,
+    groq_module.APIConnectionError,
+    groq_module.APITimeoutError,
+    groq_module.InternalServerError,
+)
 REFORMULATION_PROMPT = """You are a search query reformulation assistant.
 An evaluation of a Retrieval-Augmented Generation (RAG) pipeline response failed.
 
@@ -54,6 +66,23 @@ class QueryHealer:
         self.model = model
         print(f"[Healer] Initialized — model={model}")
 
+    @retry(
+        retry=retry_if_exception_type(_GROQ_RETRYABLE),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _call_groq(self, messages: list[dict]) -> str:
+        """Unified Groq API call with retry logic."""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=64,
+        )
+        return response.choices[0].message.content.strip()
+
     async def _reformulate_query(self, query: str, failure_mode: str, reasoning: str, last_answer: str) -> str:
         """Call Groq to rewrite the query asynchronously."""
         prompt = REFORMULATION_PROMPT.format(
@@ -62,35 +91,24 @@ class QueryHealer:
             reasoning=reasoning,
             answer=last_answer
         )
-
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,  # Low temperature for focused keyword generation
-            max_tokens=64
-        )
-
-        new_query = response.choices[0].message.content.strip()
+        messages = [{"role": "user", "content": prompt}]
+        new_query = await self._call_groq(messages)
         # Clean up any surrounding quotes if the LLM didn't follow formatting strictly
         new_query = new_query.strip('"').strip("'")
         return new_query
 
+    @retry(
+        retry=retry_if_exception_type(_GROQ_RETRYABLE),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
     async def _generate_strict_directive(self, reasoning: str) -> str:
-        """Generate a custom strict directive for hallucination avoidance asynchronously."""
+        """Generate a custom strict directive for hallucination avoidance with retry."""
         prompt = STRICT_Grounding_PROMPT.format(reasoning=reasoning)
-
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=100
-        )
-
-        return response.choices[0].message.content.strip()
+        messages = [{"role": "user", "content": prompt}]
+        return await self._call_groq(messages)
 
     async def heal(self, original_query: str, last_answer: str, eval_result: dict, current_k: int) -> dict:
         """

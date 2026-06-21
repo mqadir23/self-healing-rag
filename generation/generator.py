@@ -3,13 +3,36 @@ generator.py — Groq LLM generation for the Self-Healing RAG pipeline.
 
 Uses llama3-70b-8192 via the Groq API with a structured RAG prompt
 that enforces context-only answering with citations.
+
+Reliability: Groq API calls are wrapped with tenacity exponential-backoff retry
+(up to 4 attempts, 2–30s wait) to handle transient RateLimitError,
+APIConnectionError, APITimeoutError, and InternalServerError (5xx) failures.
 """
 
 import os
+import logging
+import groq as groq_module
 from groq import AsyncGroq
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Groq transient errors that are safe to retry
+_GROQ_RETRYABLE = (
+    groq_module.RateLimitError,
+    groq_module.APIConnectionError,
+    groq_module.APITimeoutError,
+    groq_module.InternalServerError,
+)
 
 
 SYSTEM_PROMPT = """You are a precise question-answering assistant.
@@ -31,6 +54,10 @@ class Generator:
       - System: Strict rules for context-only answering with citations.
       - User: Structured context block (source, page, relevance) + question
               with a re-anchoring line before generation.
+
+    Reliability:
+      - Retries up to 4 times on transient Groq errors (rate limits, timeouts,
+        connection drops, 5xx) with exponential backoff (2s → 30s, with jitter).
 
     Attributes:
         model: The Groq model identifier.
@@ -88,6 +115,31 @@ class Generator:
 
         return formatted
 
+    @retry(
+        retry=retry_if_exception_type(_GROQ_RETRYABLE),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _call_groq(self, user_message: str) -> str:
+        """
+        Inner API call wrapped with retry logic.
+
+        Separated from generate() so retries only hit the network call,
+        not context formatting or result assembly.
+        """
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return response.choices[0].message.content.strip()
+
     async def generate(self, query: str, search_results: list[dict]) -> dict:
         """
         Generate an answer for the given query using retrieved context asynchronously.
@@ -110,17 +162,12 @@ class Generator:
             f"Answer based strictly on the context above:"
         )
 
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
+        # messages list not needed; _call_groq builds messages internally
 
-        answer = response.choices[0].message.content.strip()
+
+
+
+        answer = await self._call_groq(user_message)
 
         print(f"[Generator] Answer generated — {len(answer)} chars")
 

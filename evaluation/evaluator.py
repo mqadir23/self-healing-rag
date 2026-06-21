@@ -4,15 +4,37 @@ evaluator.py — Hybrid evaluation module for the Self-Healing RAG pipeline.
 Combines fast, rule-based heuristic checks with a deep LLM-as-a-judge (Groq/Llama-3-70b)
 evaluation step. Computes standard RAG metrics (faithfulness, answer relevance,
 context relevance, completeness) to determine pass/fail status and diagnose failure modes.
+
+Reliability: Groq API calls are wrapped with tenacity exponential-backoff retry
+(up to 4 attempts, 2–30s wait) to handle transient network or rate-limit errors.
 """
 
 import os
 import json
 import re
+import logging
+import groq as groq_module
 from groq import AsyncGroq
 from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Groq transient errors that are safe to retry
+_GROQ_RETRYABLE = (
+    groq_module.RateLimitError,
+    groq_module.APIConnectionError,
+    groq_module.APITimeoutError,
+    groq_module.InternalServerError,
+)
 
 # Industry-standard weights for computed overall score (faithfulness weighted highest)
 METRIC_WEIGHTS = {
@@ -137,14 +159,15 @@ class AnswerEvaluator:
         )
         return round(overall, 3)
 
-    async def _query_llm_judge(self, query: str, context_str: str, answer: str) -> dict:
-        """Call Groq to run the LLM-as-a-judge evaluation asynchronously."""
-        formatted_prompt = EVAL_PROMPT.format(
-            query=query,
-            context=context_str,
-            answer=answer
-        )
-
+    @retry(
+        retry=retry_if_exception_type(_GROQ_RETRYABLE),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _call_groq_judge(self, formatted_prompt: str) -> str:
+        """Raw Groq API call wrapped with retry logic."""
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -153,9 +176,30 @@ class AnswerEvaluator:
             temperature=0.0,  # Deterministic for grading
             response_format={"type": "json_object"},
         )
+        return response.choices[0].message.content.strip()
 
-        raw_content = response.choices[0].message.content.strip()
-        
+    async def _query_llm_judge(self, query: str, context_str: str, answer: str) -> dict:
+        """Call Groq to run the LLM-as-a-judge evaluation asynchronously."""
+        formatted_prompt = EVAL_PROMPT.format(
+            query=query,
+            context=context_str,
+            answer=answer
+        )
+
+        try:
+            raw_content = await self._call_groq_judge(formatted_prompt)
+        except Exception as e:
+            print(f"[Evaluator] Groq judge call failed after retries: {e}")
+            return {
+                "context_relevance": 0.5,
+                "faithfulness": 0.5,
+                "answer_relevance": 0.5,
+                "answer_completeness": 0.5,
+                "overall_score": 0.5,
+                "failure_mode": "hallucination",
+                "reasoning": f"Groq judge unavailable: {e}"
+            }
+
         try:
             # Clean up potential markdown formatting wrapping the JSON
             cleaned_json = re.sub(r"^```json\s*|\s*```$", "", raw_content, flags=re.MULTILINE)
