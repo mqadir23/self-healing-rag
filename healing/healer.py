@@ -134,6 +134,9 @@ class QueryHealer:
         healed_query = original_query
         stricter_directive = None
         new_k = current_k
+        # Default balanced weights
+        dense_weight = 0.5
+        sparse_weight = 0.5
 
         # 1. Handle K parameter modification
         if failure_mode == "incomplete":
@@ -141,7 +144,19 @@ class QueryHealer:
             new_k = current_k + 3
             print(f"[Healer] Increasing retrieval K from {current_k} to {new_k}")
 
-        # 2. Handle Query Reformulation
+        # 2. Adjust retrieval weights based on failure mode
+        if failure_mode in ("bad_retrieval", "insufficient_context"):
+            # Boost sparse (BM25) to capture exact keyword matches
+            dense_weight = 0.3
+            sparse_weight = 0.7
+            print(f"[Healer] Boosting sparse weight to {sparse_weight} for keyword-focused retrieval.")
+        elif failure_mode == "hallucination":
+            # Boost dense to anchor retrieval on semantic context
+            dense_weight = 0.7
+            sparse_weight = 0.3
+            print(f"[Healer] Boosting dense weight to {dense_weight} for semantic-focused retrieval.")
+
+        # 3. Handle Query Reformulation
         # We rewrite the query for retrieval failures, completeness, off-topic, insufficient context,
         # AND as requested by the user, we also do query reformulation for hallucinations.
         if failure_mode in ["bad_retrieval", "insufficient_context", "incomplete", "off_topic", "hallucination"]:
@@ -151,7 +166,7 @@ class QueryHealer:
             except Exception as e:
                 print(f"[Healer] Error reformulating query: {e}. Falling back to original query.")
 
-        # 3. Add custom grounding directives for hallucinations
+        # 4. Add custom grounding directives for hallucinations
         if failure_mode == "hallucination":
             try:
                 stricter_directive = await self._generate_strict_directive(reasoning)
@@ -163,5 +178,7 @@ class QueryHealer:
         return {
             "healed_query": healed_query,
             "stricter_directive": stricter_directive,
-            "new_k": new_k
+            "new_k": new_k,
+            "dense_weight": dense_weight,
+            "sparse_weight": sparse_weight,
         }

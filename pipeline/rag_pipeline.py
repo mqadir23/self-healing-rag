@@ -120,19 +120,28 @@ class SelfHealingRAGPipeline:
         current_query = user_query
         current_k = self.default_k
         stricter_directive = None
+        dense_weight = 0.5
+        sparse_weight = 0.5
         attempt = 0
 
         print(f"\n[Pipeline] Processing new query: '{user_query}'")
 
         while attempt <= self.max_retries:
             print(f"\n[Pipeline] --- Attempt {attempt} (Max Retries: {self.max_retries}) ---")
-            print(f"[Pipeline] Retrieval Query: '{current_query}' | K: {current_k}")
+            print(f"[Pipeline] Retrieval Query: '{current_query}' | K: {current_k} | "
+                  f"dense_w={dense_weight:.2f}, sparse_w={sparse_weight:.2f}")
 
             # 1. Embed current query
             query_vector = await self.embedder.embed_query(current_query)
 
-            # 2. Retrieve top-K chunks from FAISS
-            search_results = await self.vector_store.search(query_vector, top_k=current_k)
+            # 2. Hybrid search: dense + sparse BM25, RRF-fused, cross-encoder re-ranked
+            search_results = await self.vector_store.search(
+                query_vector,
+                query_text=current_query,
+                top_k=current_k,
+                dense_weight=dense_weight,
+                sparse_weight=sparse_weight,
+            )
             print(f"[Pipeline] Retrieved {len(search_results)} chunk(s).")
 
             # 3. Generate answer
@@ -204,6 +213,8 @@ class SelfHealingRAGPipeline:
             current_query = healing_plan["healed_query"]
             stricter_directive = healing_plan["stricter_directive"]
             current_k = healing_plan["new_k"]
+            dense_weight = healing_plan.get("dense_weight", 0.5)
+            sparse_weight = healing_plan.get("sparse_weight", 0.5)
             attempt += 1
 
         # Return the final attempt's results if healing failed to pass within max_retries
